@@ -23,7 +23,8 @@ built on the pinned `httpz` server.
 
 ## Release validation
 
-Run `zig fmt --check build.zig src/ examples/hello-world/src/main.zig`,
-`zig build`, `zig build test`, and `zig build example` with Zig 0.15.2 before
-publishing. The repository's existing `v0.1.0` tag must be checked against the
-release commit before any push; do not overwrite a published tag.
+Verified with Zig 0.15.2 using `zig fmt build.zig src/ examples/`, `zig build`,
+`zig build test`, `zig build example`, and `zig build crud-example`. The
+standalone CRUD package also builds against `v0.1.0`. The repository's existing
+annotated `v0.1.0` tag must be checked against the release commit before any
+push; never overwrite it.

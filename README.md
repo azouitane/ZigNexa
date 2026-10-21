@@ -7,9 +7,9 @@ socket handling and route dispatch to httpz.
 
 ## Current release
 
-| Version | Status | Release channel | Minimum Zig version |
-| --- | --- | --- | --- |
-| `v0.1.1` | Stable | Latest | `0.15.2` |
+| Stable | Latest |
+| --- | --- |
+| `v0.1.0` | `v0.1.0` |
 
 ## Requirements and status
 
@@ -29,11 +29,11 @@ From a Zig 0.15.2 project:
 
 1. Add ZigNexa as a dependency in `build.zig.zon`:
 
-   ```sh
-   zig fetch --save "git+https://github.com/azouitane/ZigNexa#v0.1.1"
+   ```bash
+   zig fetch --save "git+https://github.com/azouitane/ZigNexa#v0.1.0"
    ```
 
-2. Add the `zignexa` module to your executable in `build.zig`:
+2. Import the dependency in `build.zig`, after defining `exe`:
 
    ```zig
    const zignexa = b.dependency("zignexa", .{
@@ -45,10 +45,9 @@ From a Zig 0.15.2 project:
    exe.root_module.addImport("zignexa", zignexa.module("zignexa"));
    ```
 
-   Place this after `exe` has been defined.
-
-The dependency package wires `httpz` into the public `zignexa` module. The
-consumer does not need a separate `httpz` import. Import ZigNexa with:
+The package name and exported module are both `zignexa`. The dependency wires
+`httpz` into the public module, so no separate `httpz` import is needed. Import
+the library with:
 
 ```zig
 const std = @import("std");
@@ -73,6 +72,68 @@ fn home(c: *zignexa.Context) !void {
 ```
 
 The equivalent runnable example is in `examples/hello-world/src/main.zig`.
+
+## CRUD example
+
+`examples/crud` is a small runnable users API built through the public
+`@import("zignexa")` module. It uses an in-memory, fixed-size collection; all
+users are lost when the server restarts, so this storage is not suitable for
+production persistence.
+
+```text
+examples/crud/
+├── build.zig
+├── build.zig.zon
+└── src/main.zig
+```
+
+From the repository root, build the example against the local library source
+and run it at `http://localhost:8080`:
+
+```bash
+zig build crud-example
+zig build run-crud
+```
+
+To build independently against the `v0.1.0` package tag, run from
+`examples/crud`:
+
+```bash
+zig build
+zig build run
+```
+
+The endpoints return JSON. Create and update requests take a JSON object with a
+non-empty `name` of at most 64 bytes. Invalid IDs or bodies return 400; absent
+users return 404.
+
+| Method | Endpoint | Behavior |
+| --- | --- | --- |
+| GET | `/users` | List all users |
+| GET | `/users/:id` | Retrieve a user |
+| POST | `/users` | Create a user (201) |
+| PUT | `/users/:id` | Replace a user's name |
+| DELETE | `/users/:id` | Delete a user |
+
+With the server running, try:
+
+```bash
+curl http://localhost:8080/users
+curl -X POST http://localhost:8080/users -H 'content-type: application/json' -d '{"name":"Ada"}'
+curl http://localhost:8080/users/1
+curl -X PUT http://localhost:8080/users/1 -H 'content-type: application/json' -d '{"name":"Grace"}'
+curl -X DELETE http://localhost:8080/users/1
+```
+
+Example create request and response:
+
+```json
+{"name":"Ada"}
+```
+
+```json
+{"id":1,"name":"Ada"}
+```
 
 ## Routes and context
 
@@ -164,10 +225,11 @@ TLS-capable proxy or listener boundary appropriate to your application.
 
 ```sh
 zig version
-zig fmt build.zig src/ examples/hello-world/src/main.zig
+zig fmt build.zig src/ examples/
 zig build
 zig build test
 zig build example
+zig build crud-example
 zig build run
 ```
 
@@ -207,9 +269,10 @@ internal errors. Use an appropriate TLS boundary for production traffic.
 
 ## Versioning and release
 
-ZigNexa follows semantic versioning. `v0.1.1` is the current stable release and
-latest published version. Breaking API changes before `1.0.0` may require a
-minor version bump.
+ZigNexa follows semantic versioning. `v0.1.0` is the initial stable release
+and latest release. Breaking API changes before `1.0.0` may require a minor
+version bump. The existing `v0.1.0` tag is immutable; these working-tree
+changes do not retag or publish a release.
 
 ## License
 
