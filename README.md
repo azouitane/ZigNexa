@@ -5,6 +5,12 @@ ZigNexa is a small HTTP framework for Zig 0.15.2, built on the pinned
 Context-based handler API, route groups, and ordered middleware while leaving
 socket handling and route dispatch to httpz.
 
+## Current release
+
+| Version | Status | Release channel | Minimum Zig version |
+| --- | --- | --- | --- |
+| `v0.1.1` | Stable | Latest | `0.15.2` |
+
 ## Requirements and status
 
 - Zig 0.15.2 or newer within the supported API range.
@@ -21,34 +27,25 @@ socket handling and route dispatch to httpz.
 
 From a Zig 0.15.2 project:
 
-```sh
-zig fetch --save "git+https://github.com/azouitane/ZigNexa#v0.1.0"
-```
+1. Add ZigNexa as a dependency in `build.zig.zon`:
 
-Add the module to the consumer executable in `build.zig`:
+   ```sh
+   zig fetch --save "git+https://github.com/azouitane/ZigNexa#v0.1.1"
+   ```
 
-```zig
-const std = @import("std");
+2. Add the `zignexa` module to your executable in `build.zig`:
 
-pub fn build(b: *std.Build) void {
-    const target = b.standardTargetOptions(.{});
-    const optimize = b.standardOptimizeOption(.{});
-    const zignexa_dep = b.dependency("zignexa", .{
-        .target = target,
-        .optimize = optimize,
-    });
-    const exe = b.addExecutable(.{
-        .name = "my-app",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/main.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{.{ .name = "zignexa", .module = zignexa_dep.module("zignexa") }},
-        }),
-    });
-    b.installArtifact(exe);
-}
-```
+   ```zig
+   const zignexa = b.dependency("zignexa", .{
+       .target = target,
+       .optimize = optimize,
+   });
+
+   // Add ZigNexa to the executable's root module.
+   exe.root_module.addImport("zignexa", zignexa.module("zignexa"));
+   ```
+
+   Place this after `exe` has been defined.
 
 The dependency package wires `httpz` into the public `zignexa` module. The
 consumer does not need a separate `httpz` import. Import ZigNexa with:
@@ -210,10 +207,9 @@ internal errors. Use an appropriate TLS boundary for production traffic.
 
 ## Versioning and release
 
-ZigNexa follows semantic versioning. Version `0.1.0` is the first public API
-release; breaking API changes before `1.0.0` may require a minor version bump.
-To prepare a release, run the commands above, review the changes, create the
-`v0.1.0` tag on the release commit, and push branches and tags to both remotes.
+ZigNexa follows semantic versioning. `v0.1.1` is the current stable release and
+latest published version. Breaking API changes before `1.0.0` may require a
+minor version bump.
 
 ## License
 
