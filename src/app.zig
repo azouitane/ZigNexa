@@ -67,7 +67,6 @@ pub const App = struct {
     pub fn tryPOST(self: *Self, path: []const u8, comptime callback: anytype) !void {
         try self.registerGrouped(.POST, path, handler.adapt(callback), &.{}, &.{});
     }
-
     /// Register a PUT route.
     pub fn PUT(self: *Self, path: []const u8, comptime callback: anytype) void {
         self.tryPUT(path, callback) catch @panic("failed to register PUT route");

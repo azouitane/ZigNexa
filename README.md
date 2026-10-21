@@ -1,203 +1,220 @@
 # ZigNexa
 
-ZigNexa is a lightweight HTTP framework facade over the pinned [httpz.zig](https://github.com/karlseguin/http.zig) server. It targets Zig 0.15.2 and keeps request dispatch, path matching, and middleware traversal in httpz.
+ZigNexa is a small HTTP framework for Zig 0.15.2, built on the pinned
+[httpz.zig](https://github.com/karlseguin/http.zig) server. It provides a
+Context-based handler API, route groups, and ordered middleware while leaving
+socket handling and route dispatch to httpz.
 
-## Goals and status
+## Requirements and status
 
-The current implementation provides a small Context API, common HTTP method routes with `:param` paths, route groups, and ordered middleware. It favors static handler and middleware callbacks and registration-time composition.
+- Zig 0.15.2 or newer within the supported API range.
+- The `httpz` dependency is pinned in `build.zig.zon` and resolved automatically
+  by Zig's package manager.
+- Implemented: GET, POST, PUT, PATCH, DELETE, HEAD and OPTIONS routes, `:param`
+  paths, query and request header access, response headers, text and JSON
+  responses, groups, middleware, 404 responses, and returned-error handling.
+- Not implemented: 405 method negotiation, custom not-found callbacks, TLS,
+  asynchronous handlers, per-request timeout/cancellation, and arbitrary panic
+  recovery. httpz returns 404 for unmatched method/path combinations.
 
-Current limitations:
+## Installation
 
-- The ZigNexa route facade supports GET, POST, PUT, PATCH, DELETE, HEAD, and OPTIONS. Trace, CONNECT, and arbitrary extension methods remain available through the re-exported `httpz` module.
-- httpz returns 404 for unmatched routes; its current router does not expose a 405 method negotiation hook to ZigNexa.
-- ZigNexa does not yet expose custom not-found/error-handler registration. Unhandled returned errors become 500 responses in httpz; use `Recovery` to control the response body.
-- Recovery catches returned Zig errors only. It cannot catch panics.
-- Timeout middleware is not provided. httpz does not expose per-request cancellation for this synchronous callback chain.
-- Middleware and routes must be registered before serving. Group middleware applies to routes registered after that middleware is added.
-- The default listener binds to localhost. `Run` also binds to localhost; use `init` with an explicit `httpz.Config` to bind another address.
-
-## Requirements
-
-- Zig 0.15.2
-- The exact httpz dependency pinned in `build.zig.zon`
-
-The repository uses Zig's package manager. Run `zig build --fetch` when the dependency is not already present in the local package cache.
-
-## Build and test
+From a Zig 0.15.2 project:
 
 ```sh
-zig version
-zig fmt build.zig src/
-zig build
-zig build test
-zig build run
+zig fetch --save "git+https://github.com/azouitane/ZigNexa#v0.1.0"
 ```
 
-The tests are registered through the `test` step in `build.zig`. They cover global/group/route middleware registration order, route parameter matching, Context query and response helpers, continuation, recovery, CORS preflight, and request ID validation.
+Add the module to the consumer executable in `build.zig`:
+
+```zig
+const std = @import("std");
+
+pub fn build(b: *std.Build) void {
+    const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
+    const zignexa_dep = b.dependency("zignexa", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    const exe = b.addExecutable(.{
+        .name = "my-app",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{.{ .name = "zignexa", .module = zignexa_dep.module("zignexa") }},
+        }),
+    });
+    b.installArtifact(exe);
+}
+```
+
+The dependency package wires `httpz` into the public `zignexa` module. The
+consumer does not need a separate `httpz` import. Import ZigNexa with:
+
+```zig
+const std = @import("std");
+const zignexa = @import("zignexa");
+```
 
 ## Hello World
 
-The public module import name is `zignexa`:
-
 ```zig
-const ZigNexa = @import("zignexa");
+const zignexa = @import("zignexa");
 
 pub fn main() !void {
-    var app = ZigNexa.Default();
-    app.GET("/", home);
-    try app.Run(8080);
+    var app = try zignexa.App.init(std.heap.page_allocator, .{ .address = .localhost(8080) });
+    defer app.deinit();
+    try app.tryGET("/", home);
+    try app.listen();
 }
 
-fn home(c: *ZigNexa.Context) !void {
-    try c.String(200, "Hello from ZigNexa!");
+fn home(c: *zignexa.Context) !void {
+    try c.String(200, "Hello, world!");
 }
 ```
 
-`Default` uses `std.heap.page_allocator`. For explicit allocator ownership, initialize an app with `App.init(allocator, httpz_config)`, then call `listen` and `deinit` yourself.
+The equivalent runnable example is in `examples/hello-world/src/main.zig`.
 
-## Routing and Context
+## Routes and context
 
-ZigNexa exposes `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`, and `OPTIONS`, with fallible `try*` forms. These methods are also available on route groups. Handlers receive a request-scoped `*Context`:
+`App.init(allocator, httpz_config)` initializes the listener and framework
+storage. `deinit` releases it. Routes and middleware should be registered
+before `listen`. Capitalized convenience methods panic on registration
+allocation errors; use the `try*` variants for explicit error handling.
 
 ```zig
-app.GET("/users/:id", getUser);
+try app.tryGET("/users/:id", getUser);
+try app.tryPOST("/users", createUser);
 
-fn getUser(c: *ZigNexa.Context) !void {
+fn getUser(c: *zignexa.Context) !void {
     const id = c.Param("id");
     const page = (try c.Query("page")) orelse "1";
+    const agent = c.RequestHeader("user-agent") orelse "unknown";
     c.Header("Cache-Control", "no-store");
-    try c.JSON(200, .{ .id = id, .page = page });
+    try c.JSON(200, .{ .id = id, .page = page, .agent = agent });
 }
 ```
 
-`Param` returns an empty string if the name is absent. `Query` returns an optional request-lifetime slice and can fail while httpz parses the query. Request headers are read with `RequestHeader` (use lowercase names). `Header` adds a response header. `String` sets a text response, and `JSON` serializes a value using Zig's JSON formatter.
-
-The `httpz` request and response are exposed as `Context.request` and `Context.response` for advanced use. Those pointers and their data are valid only while the request is being handled.
+The other supported route helpers are `tryPUT`, `tryPATCH`, `tryDELETE`,
+`tryHEAD`, and `tryOPTIONS`; corresponding capitalized wrappers are also
+available. `Param` returns an empty slice for an absent key. `Query` returns an
+optional request-lifetime slice and can return a parsing error. Request header
+names use httpz's lowercase lookup convention. `String` writes plain text;
+`JSON` serializes using Zig's JSON support. The request, response, and their
+data are valid only while handling that request.
 
 ## Route groups
 
-Groups prepend a prefix and can add middleware:
+Groups prepend a prefix and can register middleware:
 
 ```zig
 var api = app.Group("/api/v1");
-api.Use(authenticate);
-api.GET("/health", health);
+try api.tryUse(authenticate);
+try api.tryGET("/health", health);
 ```
 
-Middleware added to the group runs after app middleware and before route-local middleware. Add it before registering routes. Prefix joining handles a single slash at the boundary.
-
-Route-local middleware can be created and passed as handles:
-
-```zig
-const auth = try app.createMiddleware(authenticate);
-app.GETWithMiddleware("/private", privateHandler, &.{auth});
-```
-
-The app owns each middleware implementation and releases it on `deinit` or when `Run` returns. Do not retain a middleware handle after its app is deinitialized.
+Groups and their middleware storage are app-owned. Add group middleware before
+registering routes. For route-local middleware, create a middleware handle
+with `app.createMiddleware(callback)` and pass it to `GETWithMiddleware` or
+`Handle`; the app owns the handle until `deinit`.
 
 ## Middleware
 
-Middleware has the signature `fn (*Context) !void`. Call `try c.Next()` to continue; return without calling `Next` to stop dispatch. A middleware that calls `Next` more than once is not supported by httpz's executor. Composition follows registration order and uses httpz's executor without allocating a chain per request. Route middleware arrays are assembled during registration.
-
-Global middleware runs in registration order, followed by group middleware, route middleware, and the handler. Register global middleware before routes so each route receives it. Global middleware is also used for unmatched requests through httpz's not-found execution path.
-
-```zig
-app.Use(ZigNexa.middleware.Logger);
-app.Use(ZigNexa.middleware.Recovery);
-app.Use(ZigNexa.middleware.RequestID);
-```
-
-Built-ins:
-
-- `Logger` logs method, path, final response status, and elapsed monotonic nanoseconds. Put `Recovery` after it so returned errors become 500 before the logger records the result.
-- `Recovery` catches returned errors from downstream middleware or handlers and replaces the response with plain-text 500. It does not catch panics.
-- `RequestID` preserves a valid incoming `X-Request-ID` (1–128 ASCII alphanumeric, `-`, `_`, `.`, or `:` characters). Invalid or missing values are replaced with 128-bit random hex and returned as `X-Request-ID`. Treat client-provided IDs as correlation labels, not trusted identity.
-- `cors(config)` performs exact origin matching, adds configured allow headers, and answers OPTIONS requests that include `Access-Control-Request-Method` with 204. A single `"*"` origin allows all origins; credentials are omitted for wildcard policy.
-
-Example CORS configuration:
+Middleware has signature `fn (*Context) !void`. Call `try c.Next()` to run the
+next middleware or handler; returning without calling `Next` short-circuits.
+The order is global middleware in registration order, then group middleware in
+registration order, then route middleware in supplied order, then the handler.
+Register app-wide middleware before routes. Middleware runs on the httpz
+request callback; calling `Next` more than once is unsupported.
 
 ```zig
-app.Use(ZigNexa.middleware.cors(.{
+try app.tryUse(zignexa.middleware.Logger);
+try app.tryUse(zignexa.middleware.Recovery);
+try app.tryUse(zignexa.middleware.RequestID);
+try app.tryUse(zignexa.middleware.cors(.{
     .origins = &.{"https://example.com"},
-    .methods = "GET, OPTIONS",
+    .methods = "GET, POST, OPTIONS",
     .headers = "Content-Type, X-Request-ID",
-    .max_age_seconds = 600,
-    .allow_credentials = true,
 }));
 ```
 
-## Error handling
+- `Logger` reports method, path, final status, and elapsed monotonic time. Put
+  `Recovery` after it so errors are converted before logging completes.
+- `Recovery` catches returned Zig errors and sends a generic text 500. It cannot
+  recover from panics or process-level failures.
+- `RequestID` validates an incoming `X-Request-ID` (1–128 permitted ASCII
+  characters), or generates a random 128-bit hexadecimal ID, then returns it in
+  the response header. IDs are correlation labels, not authentication.
+- `cors(config)` uses exact origin matching, supports `"*"`, and answers
+  preflight OPTIONS requests with 204. Credentials are not emitted for wildcard
+  origins. Configure origins narrowly; CORS is not access control.
 
-Handlers and middleware return Zig error unions. httpz propagates returned errors through the executor; its server responds with status 500 if they remain uncaught. Add `Recovery` to replace that default response body. Zig panics are not recoverable through this middleware. Avoid returning an error after committing a response with direct lower-level `httpz.Response.write` calls.
+There is no timeout middleware because this synchronous API has no per-request
+cancellation contract.
 
-## Complete example
+## Errors and HTTP behavior
 
-This complete application is also in `src/main.zig`:
+Handler and middleware errors propagate through httpz. If no `Recovery`
+middleware catches them, httpz returns a server error response. Unmatched
+routes and unsupported methods return httpz's 404 response; ZigNexa does not
+currently distinguish 405. Avoid returning errors after writing directly to
+the lower-level response stream. ZigNexa does not provide TLS; deploy behind a
+TLS-capable proxy or listener boundary appropriate to your application.
 
-```zig
-const ZigNexa = @import("zignexa");
+## Build, test, and run examples
 
-pub fn main() !void {
-    var app = ZigNexa.Default();
-    app.Use(ZigNexa.middleware.Logger);
-    app.Use(ZigNexa.middleware.Recovery);
-    app.Use(ZigNexa.middleware.RequestID);
-    app.GET("/", home);
-    app.GET("/users/:id", getUser);
-    var api = app.Group("/api/v1");
-    api.GET("/health", health);
-    try app.Run(8080);
-}
-
-fn home(c: *ZigNexa.Context) !void {
-    try c.String(200, "Hello from ZigNexa!");
-}
-
-fn getUser(c: *ZigNexa.Context) !void {
-    try c.JSON(200, .{ .id = c.Param("id"), .name = "Ahmed" });
-}
-
-fn health(c: *ZigNexa.Context) !void {
-    try c.JSON(200, .{ .status = "ok" });
-}
+```sh
+zig version
+zig fmt build.zig src/ examples/hello-world/src/main.zig
+zig build
+zig build test
+zig build example
+zig build run
 ```
 
-## Project structure
+`zig build example` builds and installs the example binary. `zig build run`
+starts it on localhost port 8080 (`zig build run-example` is an equivalent
+alias). Run build commands from the repository root. Tests cover Context helpers,
+route parameter registration, middleware ordering and short-circuiting,
+returned errors, CORS, and request IDs.
 
-```text
-build.zig                 Build, run, and test steps
-build.zig.zon             Zig version floor and pinned httpz dependency
-src/root.zig              Public zignexa module
-src/app.zig               Server lifecycle, routes, and global middleware
-src/context.zig           Request and response helpers
-src/handler.zig           httpz handler/middleware adapters
-src/route_group.zig       Prefix routes and group middleware
-src/middleware.zig        Logger, recovery, CORS, request IDs
-src/main.zig              Runnable example
-```
+## Architecture
 
-## Development
+- `src/root.zig`: public `zignexa` module.
+- `src/app.zig`: app lifecycle, route registration, global middleware.
+- `src/context.zig`: request-scoped accessors and response helpers.
+- `src/handler.zig`: adapters to httpz callbacks and executor.
+- `src/route_group.zig`: prefixed registrations and group middleware.
+- `src/middleware.zig`: Logger, Recovery, RequestID, and CORS.
+- `examples/hello-world/src/main.zig`: runnable example application.
 
-Keep changes compatible with Zig 0.15.2 and the pinned httpz commit. Add behavior tests alongside the relevant module, format with `zig fmt build.zig src/`, and run both `zig build` and `zig build test`. Update this README when behavior or public signatures change. Prefer small changes that use httpz's actual router and executor instead of duplicating request dispatch.
+Route and middleware composition happens during registration. Request and
+response lifetimes remain owned by httpz; the app arena holds route and
+registration data until `deinit`. Do not retain Context or request slices past
+the handler call.
+
+## Development and contributions
+
+Use Zig 0.15.2, preserve the pinned httpz revision, format changed Zig files,
+and run `zig build` and `zig build test`. Update this README when changing
+public behavior or signatures. Keep changes focused on httpz's existing
+router/executor model.
 
 ## Security
 
-- Validate and bound application input before using it. `Param` and `Query` return untrusted request data.
-- Configure CORS origins narrowly. CORS is a browser policy, not authentication.
-- Request IDs are for correlation only. The middleware accepts safe client-provided IDs but replaces malformed values.
-- Use TLS at an appropriate deployment boundary; this framework currently provides a plain HTTP listener through httpz.
-- Avoid exposing internal error details to clients. `Recovery` deliberately returns a generic message.
+Validate untrusted path and query values before using them. Restrict CORS
+origins, do not treat request IDs as trusted identity, and avoid exposing
+internal errors. Use an appropriate TLS boundary for production traffic.
 
-## Performance
+## Versioning and release
 
-Route and middleware composition happens during registration. The request path delegates to httpz and does not allocate middleware-chain storage per request. `Query` may trigger lazy parsing, JSON responses serialize into httpz's request-scoped response buffer, and request IDs allocate 16 bytes of request-arena storage for generated IDs.
+ZigNexa follows semantic versioning. Version `0.1.0` is the first public API
+release; breaking API changes before `1.0.0` may require a minor version bump.
+To prepare a release, run the commands above, review the changes, create the
+`v0.1.0` tag on the release commit, and push branches and tags to both remotes.
 
-No benchmark results are claimed. A future benchmark should compare the same handler and payload against the pinned httpz server in ReleaseFast mode, report request rate and latency distributions, and include the exact command and hardware. The current `benchmarks/` directory is not present.
+## License
 
-## Roadmap
-
-- Expose POST/PUT/PATCH/DELETE and other httpz methods through ZigNexa's Context API.
-- Add a configurable 404 handler and method-aware 405 responses if supported cleanly by httpz.
-- Add integration tests for real response serialization and CORS preflight requests.
-- Evaluate request cancellation support before considering timeout middleware.
-- Add reproducible performance benchmarks.
+ZigNexa is distributed under the MIT License. See [LICENSE](LICENSE).
