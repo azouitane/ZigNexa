@@ -1,0 +1,14 @@
+# Zig build artifacts
+.zig-cache/
+zig-cache/
+zig-out/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Editors and operating system
+.vscode/
+.idea/
+.DS_Store
