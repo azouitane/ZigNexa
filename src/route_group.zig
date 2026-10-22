@@ -5,8 +5,11 @@ const App = @import("app.zig").App;
 const Middleware = @import("app.zig").Middleware;
 const handler = @import("handler.zig");
 
-/// Route registrations under a shared path prefix.
-/// Group middleware runs after app middleware and before route middleware.
+/// Route registrations under a shared path prefix. The prefix and middleware
+/// list are stored in the app arena; this value must not be used after its app
+/// is deinitialized. Its `app` pointer also requires the app to stay at the
+/// same address while this group is in use. Group middleware runs after app
+/// middleware and before route middleware.
 pub const RouteGroup = struct {
     app: *App,
     prefix: []const u8,
@@ -101,7 +104,7 @@ pub const RouteGroup = struct {
         route_middleware: []const Middleware,
     ) !void {
         const route_path = try self.joinPath(path);
-        try self.app.registerGrouped(.GET, route_path, handler.adapt(callback), self.middleware.items, route_middleware);
+        try self.app.registerGroupedOwned(.GET, route_path, handler.adapt(callback), self.middleware.items, route_middleware);
     }
 
     /// Register a route with additional route-local middleware.
@@ -112,7 +115,7 @@ pub const RouteGroup = struct {
         route_middleware: []const Middleware,
     ) void {
         const route_path = self.joinPath(path) catch @panic("failed to allocate grouped route path");
-        self.app.registerGrouped(.GET, route_path, handler.adapt(callback), self.middleware.items, route_middleware) catch @panic("failed to register grouped GET route");
+        self.app.registerGroupedOwned(.GET, route_path, handler.adapt(callback), self.middleware.items, route_middleware) catch @panic("failed to register grouped GET route");
     }
 
     /// Register a supported method beneath this group with route middleware.
@@ -124,12 +127,12 @@ pub const RouteGroup = struct {
         route_middleware: []const Middleware,
     ) !void {
         const route_path = try self.joinPath(path);
-        try self.app.registerGrouped(method, route_path, handler.adapt(callback), self.middleware.items, route_middleware);
+        try self.app.registerGroupedOwned(method, route_path, handler.adapt(callback), self.middleware.items, route_middleware);
     }
 
     fn tryVerb(self: *RouteGroup, method: httpz.Method, path: []const u8, comptime callback: anytype) !void {
         const route_path = try self.joinPath(path);
-        try self.app.registerGrouped(method, route_path, handler.adapt(callback), self.middleware.items, &.{});
+        try self.app.registerGroupedOwned(method, route_path, handler.adapt(callback), self.middleware.items, &.{});
     }
 
     fn joinPath(self: *RouteGroup, path: []const u8) ![]const u8 {

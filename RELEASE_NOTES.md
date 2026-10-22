@@ -1,17 +1,43 @@
-# ZigNexa v0.1.0
+# ZigNexa v0.1.1
 
-Initial public release of ZigNexa, a lightweight HTTP framework for Zig 0.15.2
-built on the pinned `httpz` server.
+Patch release for Zig 0.15.2. This release updates application lifecycle and
+registration behavior, vendors the pinned httpz dependency with local listener
+startup cleanup fixes, and replaces the previous examples with a basic server
+example.
 
-## Included
+## Changes
 
-- Public `zignexa` module with `App`, `Context`, and middleware exports.
-- GET, POST, PUT, PATCH, DELETE, HEAD, and OPTIONS route registration, including
-  path parameters and prefixed route groups.
-- Request query/header access and plain-text/JSON response helpers.
-- Global, group, and route middleware with continuation and short-circuiting.
-- Logger, returned-error Recovery, RequestID, and CORS middleware.
-- Build, test, and Hello World example steps.
+- Vendor the exact httpz revision previously pinned by ZigNexa, so package
+  builds use the included source. The vendored source adds cleanup for the
+  listener and initialized workers when listener startup fails.
+- Store route metadata and route paths in the httpz server's startup arena,
+  validate supported methods before registration, preserve global/group/route
+  middleware ordering, and reject global middleware registration after routes.
+- Keep app ownership with the caller after `Run`/`listen`; callers stop serving
+  and deinitialize the app after listener and serving threads have finished.
+- Add `Context.HeaderCopy` and `Context.StringCopy` for response values that
+  need copying into request response storage.
+- Replace the hello-world and CRUD examples with `examples/basic.zig` and the
+  root `example`, `run-example`, and `run` build steps.
+- Add tests for allocation failures, registration and middleware behavior,
+  request helpers, and live HTTP lifecycle and routing behavior.
+
+## Tests and example
+
+The repository test suite includes allocation failure, registration and
+middleware behavior, request helper, and live HTTP lifecycle/routing tests.
+The release checks are:
+
+```sh
+zig fmt --check build.zig src/ examples/
+zig build
+zig build test
+zig build example
+git diff --check
+```
+
+The basic server example listens on localhost port 8080 and can be built with
+`zig build example` or run with `zig build run-example`.
 
 ## Known limitations
 
@@ -20,11 +46,3 @@ built on the pinned `httpz` server.
 - Recovery handles returned errors, not panics.
 - TLS, asynchronous handlers, and per-request timeout/cancellation are not
   provided.
-
-## Release validation
-
-Verified with Zig 0.15.2 using `zig fmt build.zig src/ examples/`, `zig build`,
-`zig build test`, `zig build example`, and `zig build crud-example`. The
-standalone CRUD package also builds against `v0.1.0`. The repository's existing
-annotated `v0.1.0` tag must be checked against the release commit before any
-push; never overwrite it.
